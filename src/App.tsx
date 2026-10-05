@@ -1,126 +1,139 @@
+import { useReducer, useState } from "react";
 import "./styles.css";
+import { initialState, reducer, ROLE_LABEL, isWaitingForPart } from "./store";
+import { venues } from "./seed";
+import Ledger from "./components/Ledger";
+import Inventory from "./components/Inventory";
+import Report from "./components/Report";
 
-const project = {
-  "sourceNo": 7,
-  "id": "hxyfront-62005",
-  "port": 62005,
-  "title": "管风琴音管调音记录",
-  "domain": "管风琴维护",
-  "prompt": "做一个给管风琴维护人员使用的音管调音记录前端项目，可以记录教堂或音乐厅名称、音栓、音管编号、音高、音分偏差、温湿度、簧片状态和维修备注。页面需要有音栓列表、调音偏差表、温湿度记录、异常音管标记和单次维护报告页。",
-  "palette": [
-    "#854d0e",
-    "#475569",
-    "#0ea5e9"
-  ],
-  "metrics": [
-    "音栓数量",
-    "偏差超限",
-    "温度",
-    "湿度"
-  ],
-  "filters": [
-    "主音栓",
-    "簧片音栓",
-    "混合音栓",
-    "低音管"
-  ],
-  "fields": [
-    "场馆名称",
-    "音栓",
-    "音管编号",
-    "音高",
-    "音分偏差",
-    "维修备注"
-  ],
-  "records": [
-    [
-      "St.Mary",
-      "Trumpet 8'",
-      "C#4 +9cent",
-      "簧片需微调"
-    ],
-    [
-      "ConcertHall A",
-      "Principal 4'",
-      "G3 -3cent",
-      "正常"
-    ],
-    [
-      "Abbey Room",
-      "Bourdon 16'",
-      "F2 -12cent",
-      "标记复检"
-    ]
-  ]
-};
+type Tab = "ledger" | "inventory" | "report";
+
+const TABS: Array<{ id: Tab; label: string }> = [
+  { id: "ledger", label: "音管台账" },
+  { id: "inventory", label: "簧片备件库" },
+  { id: "report", label: "单次维护报告" },
+];
 
 function App() {
+  const [state, dispatch] = useReducer(reducer, initialState);
+  const [tab, setTab] = useState<Tab>("ledger");
+
+  const pipes = state.pipes.filter((p) => p.venueId === state.venueId);
+  const stopCount = new Set(pipes.map((p) => p.stop)).size;
+  const overCount = pipes.filter((p) => Math.abs(p.cents) > 5).length;
+  const waitingCount = pipes.filter((p) => isWaitingForPart(p, state.requests)).length;
+  const env = state.env[state.venueId];
+
   return (
     <main className="app">
       <section className="hero">
-        <p>{project.id} · 源提示词{project.sourceNo} · Port {project.port}</p>
-        <h1>{project.title}</h1>
-        <span>{project.prompt}</span>
+        <p>hxyfront-62005 · 管风琴维护 · 台账 × 备件库 × 维护报告联动</p>
+        <h1>管风琴音管调音记录</h1>
+        <span>
+          簧片异常的音管须先申请同规格备用簧片并出库才能定音；库房归琴房主管保管，技师越权领用会被拦下；
+          各场馆备件分开记账，容量不够先排队等出库，待料管子不算完成；现场离线按本地预留先占住备件，
+          回网后与库房对账，对不上的退回待确认；出库失败恢复后按申请先后接着办，已领走的记录照旧。
+        </span>
+        <div className="control-bar">
+          <div className="control">
+            <small>当前身份</small>
+            <div className="seg">
+              {(["technician", "supervisor"] as const).map((r) => (
+                <button
+                  key={r}
+                  className={state.role === r ? "active" : ""}
+                  onClick={() => dispatch({ type: "SET_ROLE", role: r })}
+                >
+                  {ROLE_LABEL[r]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="control">
+            <small>现场网络</small>
+            <div className="seg">
+              <button
+                className={state.online ? "active" : ""}
+                onClick={() => !state.online && dispatch({ type: "TOGGLE_ONLINE" })}
+              >
+                在线
+              </button>
+              <button
+                className={!state.online ? "active warn" : ""}
+                onClick={() => state.online && dispatch({ type: "TOGGLE_ONLINE" })}
+              >
+                离线（本地预留）
+              </button>
+            </div>
+          </div>
+          <div className="control">
+            <small>库房系统</small>
+            <div className="seg">
+              <button
+                className={state.warehouseOk ? "active" : ""}
+                onClick={() => !state.warehouseOk && dispatch({ type: "TOGGLE_WAREHOUSE" })}
+              >
+                正常
+              </button>
+              <button
+                className={!state.warehouseOk ? "active danger" : ""}
+                onClick={() => state.warehouseOk && dispatch({ type: "TOGGLE_WAREHOUSE" })}
+              >
+                故障（出库失败）
+              </button>
+            </div>
+          </div>
+          <div className="control">
+            <small>场馆（备件分开记账）</small>
+            <div className="seg">
+              {venues.map((v) => (
+                <button
+                  key={v.id}
+                  className={state.venueId === v.id ? "active" : ""}
+                  onClick={() => dispatch({ type: "SET_VENUE", venueId: v.id })}
+                >
+                  {v.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       </section>
 
       <section className="metrics">
-        {project.metrics.map((metric: string, index: number) => (
-          <article key={metric}>
-            <small>{metric}</small>
-            <strong>{[86, 14, 7, 32][index] ?? 12}</strong>
-          </article>
+        <article>
+          <small>音栓数量</small>
+          <strong>{stopCount}</strong>
+        </article>
+        <article>
+          <small>偏差超限（|¢|&gt;5）</small>
+          <strong>{overCount}</strong>
+        </article>
+        <article>
+          <small>温度</small>
+          <strong>{env ? `${env.temp.toFixed(1)}℃` : "—"}</strong>
+        </article>
+        <article>
+          <small>湿度</small>
+          <strong>{env ? `${env.humidity}%` : "—"}</strong>
+        </article>
+        <article>
+          <small>待料音管</small>
+          <strong className={waitingCount > 0 ? "warn-text" : ""}>{waitingCount}</strong>
+        </article>
+      </section>
+
+      <nav className="tabs">
+        {TABS.map((t) => (
+          <button key={t.id} className={tab === t.id ? "active" : ""} onClick={() => setTab(t.id)}>
+            {t.label}
+          </button>
         ))}
-      </section>
+      </nav>
 
-      <section className="workspace">
-        <aside className="panel">
-          <h2>{project.domain}筛选</h2>
-          <div className="chips">
-            {project.filters.map((item: string) => (
-              <button key={item}>{item}</button>
-            ))}
-          </div>
-        </aside>
-
-        <section className="panel form-panel">
-          <div className="heading">
-            <div>
-              <p>专业字段</p>
-              <h2>新增记录</h2>
-            </div>
-            <button className="primary">保存草稿</button>
-          </div>
-          <div className="field-grid">
-            {project.fields.map((field: string) => (
-              <label key={field}>
-                <span>{field}</span>
-                <input placeholder={"填写" + field} />
-              </label>
-            ))}
-          </div>
-        </section>
-      </section>
-
-      <section className="panel">
-        <div className="heading">
-          <div>
-            <p>历史记录</p>
-            <h2>近期工作台</h2>
-          </div>
-          <button>导出摘要</button>
-        </div>
-        <div className="records">
-          {project.records.map((record: string[], index: number) => (
-            <article key={record.join("-")}>
-              <b>{String(index + 1).padStart(2, "0")}</b>
-              <div>
-                <h3>{record[0]}</h3>
-                <p>{record.slice(1).join(" · ")}</p>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
+      {tab === "ledger" && <Ledger state={state} dispatch={dispatch} />}
+      {tab === "inventory" && <Inventory state={state} dispatch={dispatch} />}
+      {tab === "report" && <Report state={state} />}
     </main>
   );
 }
